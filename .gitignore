@@ -1,0 +1,3 @@
+mysql-exporter/.my.cnf
+.env
+*.log

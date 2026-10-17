@@ -1,0 +1,162 @@
+services:
+
+  web:
+    build: .
+    container_name: news-web
+    restart: unless-stopped
+    volumes:
+      - ./app:/var/www/html
+    depends_on:
+      - mysql
+    networks:
+      - news-network
+
+  mysql:
+    image: mysql:8.0
+    container_name: news-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: news_db
+      MYSQL_USER: news_user
+      MYSQL_PASSWORD: news123
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./app/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - news-network
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: news-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+    ports:
+      - "8081:80"
+    depends_on:
+      - mysql
+    networks:
+      - news-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: news-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - web
+    networks:
+      - news-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: news-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    networks:
+      - news-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: news-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - news-network
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: news-node-exporter
+    restart: unless-stopped
+    command:
+      - "--path.rootfs=/host"
+    volumes:
+      - /:/host:ro,rslave
+    networks:
+      - news-network
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: news-cadvisor
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    networks:
+      - news-network
+
+  mysqld-exporter:
+    image: prom/mysqld-exporter:latest
+    container_name: news-mysqld-exporter
+    restart: unless-stopped
+    command:
+      - "--config.my-cnf=/cfg/.my.cnf"
+    volumes:
+      - ./mysql-exporter/.my.cnf:/cfg/.my.cnf:ro
+    depends_on:
+      - mysql
+    networks:
+      - news-network
+
+  loki:
+    image: grafana/loki:latest
+    container_name: news-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command:
+      - "-config.file=/etc/loki/local-config.yaml"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    networks:
+      - news-network
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: news-promtail
+    restart: unless-stopped
+    command:
+      - "-config.file=/etc/promtail/config.yml"
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      - loki
+    networks:
+      - news-network
+
+volumes:
+  mysql_data:
+  grafana_data:
+  loki_data:
+
+networks:
+  news-network:
+    driver: bridge
